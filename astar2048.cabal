@@ -1,0 +1,25 @@
+cabal-version: 3.0
+
+author: lamekino
+synopsis: 2048 Solver using A*
+
+name: astar2048
+version: 0.1.0.0
+build-type: Simple
+
+common warnings
+    ghc-options: -Wall
+
+executable astar2048
+    import: warnings
+    main-is: Main.hs
+    other-modules: Game, Window
+    build-depends:
+        base ^>=4.17.2.1,
+        array ^>=0.5.4.0,
+        containers ^>= 0.6.7,
+        random ^>= 1.2.1.2,
+        text ^>= 2.0.2,
+        sdl2 ^>= 2.5.5.0
+    hs-source-dirs: src
+    default-language: Haskell2010
