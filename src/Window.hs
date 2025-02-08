@@ -9,7 +9,14 @@ import Data.Char (digitToInt)
 import Data.Text (pack)
 import Data.Word (Word8)
 import Debug.Trace (traceShow)
-import Game (Game, GameResult, Move (East, North, South, West), isGameOver, moveGame)
+import Foreign.C (CInt (CInt))
+import Game
+  ( Game,
+    GameResult,
+    Move (East, North, South, West),
+    isGameOver,
+    moveGame,
+  )
 import SDL
   ( Event (eventPayload),
     EventPayload (KeyboardEvent, WindowClosedEvent),
@@ -41,7 +48,7 @@ gameWindowX :: (Integral a) => a
 gameWindowX = 640
 
 gameWindowY :: (Integral a) => a
-gameWindowY = 808
+gameWindowY = 800
 
 gameWindowInit :: IO (Renderer, Window)
 gameWindowInit = do
@@ -57,26 +64,28 @@ gameWindowInit = do
 renderInit :: Renderer -> IO Renderer
 renderInit renderer = do
   let colorBG = "#E3DFD4"
-      colorEmpty = "#A09081"
+      colorGrid = "#A09081"
+      colorEmpty = "#B1A396"
 
-  let playSpaceX = gameWindowX `div` 32
-      playSpaceY = gameWindowY `div` 6
-      playSpaceW = gameWindowX - 2 * playSpaceX
-      playSpaceH = gameWindowY - playSpaceY - playSpaceX
-      playSpace =
+  let spacing = 12
+
+  let gridX = gameWindowX `div` 18
+      gridY = gameWindowY `div` 4
+      gridW = gameWindowX - 2 * gridX + spacing
+      gridH = gameWindowY - gridY - gridX + spacing
+      grid =
         Rectangle
-          (P $ V2 playSpaceX playSpaceY)
-          (V2 playSpaceW playSpaceH)
+          (P $ V2 (gridX - spacing) (gridY - spacing))
+          (V2 (gridW + spacing) (gridH + spacing))
 
-  let spacing = 6
-      paddingX = playSpaceW `div` 4 + spacing
-      paddingY = playSpaceH `div` 4 + spacing
-      emptySpaces =
-        [ let rX = playSpaceX + paddingX * (i - 1)
-              rY = playSpaceY + paddingY * (j - 1)
-              rW = playSpaceW `div` 4 - (2 * spacing)
-              rH = playSpaceH `div` 4 - (2 * spacing)
-           in traceShow (rX, rY, rW, rH) $ Rectangle (P $ V2 rX rY) (V2 rW rH)
+  let tileX = gridW `div` 4
+      tileY = gridH `div` 4
+      emptyTiles =
+        [ let rX = tileX * (i - 1) + gridX
+              rY = tileY * (j - 1) + gridY
+              rW = tileX - spacing
+              rH = tileY - spacing
+           in Rectangle (P $ V2 rX rY) (V2 rW rH)
           | i <- [1 .. 4],
             j <- [1 .. 4]
         ]
@@ -84,11 +93,11 @@ renderInit renderer = do
   rendererDrawColor renderer $= rgb colorBG
   clear renderer
 
-  rendererDrawColor renderer $= rgb colorEmpty
-  fillRect renderer (Just playSpace)
+  rendererDrawColor renderer $= rgb colorGrid
+  fillRect renderer (Just grid)
 
-  rendererDrawColor renderer $= rgb "#B1A396"
-  forM_ emptySpaces (fillRect renderer . Just)
+  rendererDrawColor renderer $= rgb colorEmpty
+  forM_ emptyTiles (fillRect renderer . Just)
 
   return renderer
 
