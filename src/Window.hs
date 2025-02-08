@@ -4,17 +4,21 @@ module Window
   )
 where
 
+import qualified Colors
 import Control.Monad (forM_, when)
-import Data.Char (digitToInt)
+import qualified Data.Array as Array
 import Data.Text (pack)
-import Data.Word (Word8)
-import Debug.Trace (traceShow)
+import Data.Vector.Storable (Vector)
+import qualified Data.Vector.Storable as Vec
+import Debug.Trace (traceShow, traceShowId)
 import Foreign.C (CInt (CInt))
 import Game
-  ( Game,
+  ( Game (gameBoard),
     GameResult,
     Move (East, North, South, West),
+    Tile (tileExponent),
     isGameOver,
+    isGameSolved,
     moveGame,
   )
 import SDL
@@ -29,26 +33,50 @@ import SDL
   )
 import SDL.Event (pollEvents)
 import SDL.Input.Keyboard.Codes
-import SDL.Vect
+import SDL.Vect hiding (Vector)
 import SDL.Video
 import System.Exit (exitSuccess)
-import Text.Printf (printf)
 
-rgb :: String -> V4 Word8
-rgb code =
-  case code of
-    [_, r1, r2, g1, g2, b1, b2] ->
-      V4 (convert r1 r2) (convert g1 g2) (convert b1 b2) 255
-    _ -> error $ printf "invalid hexcode '%s'" code
-  where
-    convert :: (Integral a) => Char -> Char -> a
-    convert a b = fromIntegral $ 16 * digitToInt a + digitToInt b
-
-gameWindowX :: (Integral a) => a
+gameWindowX :: CInt
 gameWindowX = 640
 
-gameWindowY :: (Integral a) => a
+gameWindowY :: CInt
 gameWindowY = 800
+
+gameGridPadding :: CInt
+gameGridPadding = 12
+
+gameGridX :: CInt
+gameGridX = gameWindowX `div` 18
+
+gameGridY :: CInt
+gameGridY = gameWindowY `div` 4
+
+gameGridW :: CInt
+gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
+
+gameGridH :: CInt
+gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
+
+gameGrid :: Rectangle CInt
+gameGrid =
+  Rectangle
+    (P $ V2 (gameGridX - gameGridPadding) (gameGridY - gameGridPadding))
+    (V2 (gameGridW + gameGridPadding) (gameGridH + gameGridPadding))
+
+gameTiles :: Vector (Rectangle CInt)
+gameTiles =
+  let tileX = gameGridW `div` 4
+      tileY = gameGridH `div` 4
+   in Vec.fromList
+        [ let rX = tileX * (i - 1) + gameGridX
+              rY = tileY * (j - 1) + gameGridY
+              rW = tileX - gameGridPadding
+              rH = tileY - gameGridPadding
+           in Rectangle (P $ V2 rX rY) (V2 rW rH)
+          | i <- [1 .. 4],
+            j <- [1 .. 4]
+        ]
 
 gameWindowInit :: IO (Renderer, Window)
 gameWindowInit = do
@@ -61,78 +89,74 @@ gameWindowInit = do
 
   return (renderer, window)
 
-renderInit :: Renderer -> IO Renderer
-renderInit renderer = do
-  let colorBG = "#E3DFD4"
-      colorGrid = "#A09081"
-      colorEmpty = "#B1A396"
+renderGame :: Game -> Renderer -> IO Renderer
+renderGame game renderer = do
+  let indexArray = (Array.!)
+      indexVec = (Vec.!)
 
-  let spacing = 12
+  let board = gameBoard game
 
-  let gridX = gameWindowX `div` 18
-      gridY = gameWindowY `div` 4
-      gridW = gameWindowX - 2 * gridX + spacing
-      gridH = gameWindowY - gridY - gridX + spacing
-      grid =
-        Rectangle
-          (P $ V2 (gridX - spacing) (gridY - spacing))
-          (V2 (gridW + spacing) (gridH + spacing))
-
-  let tileX = gridW `div` 4
-      tileY = gridH `div` 4
-      emptyTiles =
-        [ let rX = tileX * (i - 1) + gridX
-              rY = tileY * (j - 1) + gridY
-              rW = tileX - spacing
-              rH = tileY - spacing
-           in Rectangle (P $ V2 rX rY) (V2 rW rH)
-          | i <- [1 .. 4],
-            j <- [1 .. 4]
-        ]
-
-  rendererDrawColor renderer $= rgb colorBG
+  rendererDrawColor renderer $= Colors.mainBG
   clear renderer
 
-  rendererDrawColor renderer $= rgb colorGrid
-  fillRect renderer (Just grid)
+  rendererDrawColor renderer $= Colors.gameBG
+  fillRect renderer (Just gameGrid)
 
-  rendererDrawColor renderer $= rgb colorEmpty
-  forM_ emptyTiles (fillRect renderer . Just)
+  rendererDrawColor renderer $= Colors.tileEmpty
+  fillRects renderer gameTiles
+
+  forM_
+    (Array.indices board)
+    ( \ai@(n, m) ->
+        let vi = 4 * (m - 1) + (n - 1)
+            curTile = board `indexArray` ai
+            curRect = gameTiles `indexVec` vi
+         in rendererDrawColor renderer
+              $= Colors.tileColor curTile
+              >> fillRect renderer (Just curRect)
+    )
 
   return renderer
-
-renderGame :: Game -> Renderer -> Renderer
-renderGame = undefined
 
 gameWindowLoop :: Game -> Renderer -> Window -> IO ()
 gameWindowLoop game renderer window = do
   events <- pollEvents
-  startRenderer <- renderInit renderer
 
-  let newGame = foldr handleGameEvent game events
-      newRenderer = startRenderer
+  let maybeGame =
+        foldr
+          (\ev g -> handleGameEvent ev =<< g)
+          (Just game)
+          events
 
-  present newRenderer
+  case maybeGame of
+    Just newGame -> do
+      newRenderer <- renderGame newGame renderer
 
-  when (isGameOver game) $ do
-    gameQuit window -- TODO: do something better
-  gameWindowLoop newGame newRenderer window
+      present newRenderer
+      gameWindowLoop newGame newRenderer window
+    Nothing -> do
+      destroyWindow window
+      exitSuccess
 
-pressedKey :: Keycode -> KeyboardEventData -> Bool
-pressedKey keycode kbe =
-  keyboardEventKeyMotion kbe == Pressed
-    && keysymKeycode (keyboardEventKeysym kbe) == keycode
+handleGameEvent :: Event -> Game -> Maybe Game
+handleGameEvent event game
+  | isGameOver game = Nothing -- suspect
+  | isGameSolved game = Nothing
+  | otherwise =
+      case eventPayload event of
+        KeyboardEvent ev
+          | pressedKey KeycodeUp ev -> justMove North game
+          | pressedKey KeycodeDown ev -> justMove South game
+          | pressedKey KeycodeLeft ev -> justMove East game
+          | pressedKey KeycodeRight ev -> justMove West game
+          | otherwise -> Just game
+        WindowClosedEvent _ -> Nothing
+        _NoMatchingEvent -> Just game
+  where
+    justMove :: Move -> Game -> Maybe Game
+    justMove move = Just . traceShowId . moveGame move
 
-handleGameEvent :: Event -> Game -> Game
-handleGameEvent event game =
-  case eventPayload event of
-    KeyboardEvent kbe
-      | pressedKey KeycodeUp kbe -> moveGame North game
-      | pressedKey KeycodeDown kbe -> moveGame South game
-      | pressedKey KeycodeRight kbe -> moveGame East game
-      | pressedKey KeycodeLeft kbe -> moveGame West game
-      | otherwise -> game
-    _NoMatchingEvent -> game
-
-gameQuit :: Window -> IO ()
-gameQuit window = destroyWindow window >> exitSuccess
+    pressedKey :: Keycode -> KeyboardEventData -> Bool
+    pressedKey keycode ev =
+      keyboardEventKeyMotion ev == Pressed
+        && keysymKeycode (keyboardEventKeysym ev) == keycode

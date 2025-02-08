@@ -2,6 +2,7 @@ module Game
   ( Game (gameRng, gameScore, gameBoard),
     Move (North, South, East, West),
     GameResult (Solved, GameOver, Working),
+    Tile (tileExponent, tileMerged),
     createGame,
     isGameOver,
     isGameSolved,
