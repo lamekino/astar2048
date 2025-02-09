@@ -10,7 +10,7 @@ import qualified Data.Array as Array
 import Data.Text (pack)
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as Vec
-import Debug.Trace (traceShow, traceShowId)
+import Debug.Trace (traceShowId)
 import Foreign.C (CInt (CInt))
 import Game
   ( Game (gameBoard),
@@ -26,12 +26,12 @@ import SDL
     EventPayload (KeyboardEvent, WindowClosedEvent),
     InputMotion (Pressed),
     KeyboardEventData (keyboardEventKeyMotion, keyboardEventKeysym),
-    Keycode,
     Keysym (keysymKeycode),
     WindowClosedEventData (windowClosedEventWindow),
     ($=),
   )
 import SDL.Event (pollEvents)
+import qualified SDL.Font as TTF
 import SDL.Input.Keyboard.Codes
 import SDL.Vect hiding (Vector)
 import SDL.Video
@@ -57,6 +57,9 @@ gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
 
 gameGridH :: CInt
 gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
+
+gameFont :: TTF.Font
+gameFont = undefined
 
 gameGrid :: Rectangle CInt
 gameGrid =
@@ -87,10 +90,25 @@ gameWindowInit = do
   window <- createWindow title config
   renderer <- createRenderer window (-1) defaultRenderer
 
+  TTF.initialize
+
   return (renderer, window)
 
-renderGame :: Game -> Renderer -> IO Renderer
-renderGame game renderer = do
+renderTile ::
+  Maybe Tile ->
+  Rectangle CInt ->
+  Renderer ->
+  TTF.Font ->
+  IO Renderer
+renderTile tile rectangle renderer font = do
+  rendererDrawColor renderer $= Colors.tileColor tile
+
+  fillRect renderer (Just rectangle)
+
+  return renderer
+
+renderGame :: Game -> Renderer -> TTF.Font -> IO Renderer
+renderGame game renderer font = do
   let indexArray = (Array.!)
       indexVec = (Vec.!)
 
@@ -102,41 +120,47 @@ renderGame game renderer = do
   rendererDrawColor renderer $= Colors.gameBG
   fillRect renderer (Just gameGrid)
 
-  rendererDrawColor renderer $= Colors.tileEmpty
-  fillRects renderer gameTiles
-
   forM_
     (Array.indices board)
     ( \ai@(n, m) ->
         let vi = 4 * (m - 1) + (n - 1)
             curTile = board `indexArray` ai
             curRect = gameTiles `indexVec` vi
-         in rendererDrawColor renderer
-              $= Colors.tileColor curTile
-              >> fillRect renderer (Just curRect)
+         in renderTile curTile curRect renderer font
     )
 
   return renderer
 
 gameWindowLoop :: Game -> Renderer -> Window -> IO ()
 gameWindowLoop game renderer window = do
+  -- TODO: change this!
+  font <- TTF.load "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf" 12
+
+  let loop curGame curRenderer = do
+        maybeGame <- handleEvents curGame
+
+        case maybeGame of
+          Just newGame -> do
+            newRenderer <- renderGame newGame curRenderer TTF
+
+            present newRenderer
+            loop newGame newRenderer
+          Nothing -> do
+            destroyWindow window
+            TTF.free Fonts
+            TTF.quit
+            exitSuccess
+
+  loop game renderer
+
+handleEvents :: Game -> IO (Maybe Game)
+handleEvents game = do
   events <- pollEvents
 
-  let maybeGame =
-        foldr
-          (\ev g -> handleGameEvent ev =<< g)
-          (Just game)
-          events
-
-  case maybeGame of
-    Just newGame -> do
-      newRenderer <- renderGame newGame renderer
-
-      present newRenderer
-      gameWindowLoop newGame newRenderer window
-    Nothing -> do
-      destroyWindow window
-      exitSuccess
+  foldr
+    (\ev g -> handleGameEvent ev =<< g)
+    (Just game)
+    events
 
 handleGameEvent :: Event -> Game -> Maybe Game
 handleGameEvent event game

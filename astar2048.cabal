@@ -21,6 +21,7 @@ executable astar2048
         random ^>= 1.2.1.2,
         text ^>= 2.0.2,
         vector ^>= 0.13.2.0,
-        sdl2 ^>= 2.5.5.0
+        sdl2 ^>= 2.5.5.0,
+        sdl2-ttf ^>= 2.1.3
     hs-source-dirs: src
     default-language: Haskell2010
