@@ -4,6 +4,7 @@ module Game
     GameResult (Solved, GameOver, Working),
     Tile (tileExponent, tileMerged),
     tileValue,
+    createTile,
     createGame,
     isGameOver,
     isGameSolved,
