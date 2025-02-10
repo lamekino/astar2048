@@ -3,6 +3,7 @@ module Game
     Move (North, South, East, West),
     GameResult (Solved, GameOver, Working),
     Tile (tileExponent, tileMerged),
+    tileValue,
     createGame,
     isGameOver,
     isGameSolved,
@@ -55,8 +56,7 @@ instance Show Game where
     let resolveTile Nothing = "[    ]"
         resolveTile (Just tile) =
           printf "[%4d]" $
-            tileValue $
-              tileExponent tile
+            tileValue tile
      in unlines $
           printf "score: %d" score
             : [ concat
@@ -72,8 +72,8 @@ instance Show GameResult where
 createTile :: Int -> Tile
 createTile value = Tile {tileMerged = False, tileExponent = value}
 
-tileValue :: Int -> Integer
-tileValue = shiftL 1
+tileValue :: Tile -> Integer
+tileValue = shiftL 1 . tileExponent
 
 createGame :: StdGen -> Game
 createGame g = iterate addRandomTile emptyGame !! 2
@@ -140,7 +140,7 @@ moveTile game@(Game _ curScore curBoard) tile start finish =
         tileExponent tile + fromEnum hasMerged
 
       nextScore =
-        if hasMerged then curScore + tileValue nextExp else curScore
+        if hasMerged then curScore + tileValue tile else curScore
 
       nextBoard = runSTArray $ do
         stBoard <- thaw curBoard
