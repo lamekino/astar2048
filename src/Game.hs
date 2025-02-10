@@ -13,7 +13,7 @@ module Game
 where
 
 import Control.Monad (forM_, when)
-import Data.Array (Array, assocs, bounds, inRange, listArray, (!))
+import Data.Array (Array, assocs, bounds, inRange, indices, listArray, (!))
 import Data.Array.MArray (thaw, writeArray)
 import Data.Array.ST (runSTArray)
 import Data.Bifunctor (Bifunctor (bimap))
@@ -47,10 +47,12 @@ data Game = Game
     gameBoard :: Board
   }
 
-data GameResult
-  = Solved Game
-  | GameOver Game
-  | Working Game
+instance Eq Game where
+  g1 /= g2 = not $ g1 == g2
+  g1 == g2 =
+    let b1 = gameBoard g1
+        b2 = gameBoard g2
+     in all (\i -> b1 ! i == b2 ! i) $ indices b1
 
 instance Show Game where
   show (Game _ score board) =
@@ -64,6 +66,11 @@ instance Show Game where
                   [resolveTile $ board ! (i, j) | j <- [1 .. 4]]
                 | i <- [1 .. 4]
               ]
+
+data GameResult
+  = Solved Game
+  | GameOver Game
+  | Working Game
 
 instance Show GameResult where
   show (Solved game) = "You Won! " ++ show game
@@ -180,10 +187,11 @@ addRandomTile game@(Game g _ board) =
         runSTArray $ do
           stBoard <- thaw board
 
-          writeArray
-            stBoard
-            (available !! pickIdx)
-            (Just $ createTile value)
+          when (available /= []) $ do
+            writeArray
+              stBoard
+              (available !! pickIdx)
+              (Just $ createTile value)
 
           return stBoard
    in game {gameRng = g', gameBoard = nextBoard}
@@ -195,7 +203,10 @@ moveGame input game@(Game _ _ board) =
     updateTiles :: [(Tile, Index)] -> Game -> Game
     updateTiles updates curGame@(Game _ _ curBoard) =
       case updates of
-        [] -> addRandomTile $ removeMergeInfo curGame
+        [] ->
+          if game == curGame
+            then removeMergeInfo curGame
+            else addRandomTile $ removeMergeInfo curGame
         ((tile, idx) : rest) ->
           let nextIdx = findFurthest input curBoard tile idx
               nextGame = moveTile curGame tile idx nextIdx
