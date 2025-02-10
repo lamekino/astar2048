@@ -10,7 +10,6 @@ import qualified Data.Array as Array
 import Data.Text (pack)
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as Vec
-import Debug.Trace (traceShowId)
 import Foreign.C (CInt (CInt))
 import Game
   ( Game (gameBoard),
@@ -20,6 +19,7 @@ import Game
     isGameOver,
     isGameSolved,
     moveGame,
+    tileValue,
   )
 import SDL
   ( Event (eventPayload),
@@ -57,9 +57,6 @@ gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
 
 gameGridH :: CInt
 gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
-
-gameFont :: TTF.Font
-gameFont = undefined
 
 gameGrid :: Rectangle CInt
 gameGrid =
@@ -100,19 +97,29 @@ renderTile ::
   Renderer ->
   TTF.Font ->
   IO Renderer
-renderTile tile rectangle renderer font = do
-  rendererDrawColor renderer $= Colors.tileColor tile
+renderTile maybeTile rectangle renderer font = do
+  rendererDrawColor renderer $= Colors.tileColor maybeTile
 
   fillRect renderer (Just rectangle)
 
-  return renderer
+  case maybeTile of
+    Nothing -> return renderer
+    Just tile -> do
+      let tileText = pack $ show (tileValue tile)
+
+      -- TODO: refactor this into tileFontColor, fontRenderMethod
+      textSurface <- TTF.solid font (Colors.rgb "#000000") tileText
+      textTexture <- createTextureFromSurface renderer textSurface
+
+      copy renderer textTexture Nothing (Just rectangle)
+
+      return renderer
 
 renderGame :: Game -> Renderer -> TTF.Font -> IO Renderer
 renderGame game renderer font = do
   let indexArray = (Array.!)
       indexVec = (Vec.!)
-
-  let board = gameBoard game
+      board = gameBoard game
 
   rendererDrawColor renderer $= Colors.mainBG
   clear renderer
@@ -140,45 +147,43 @@ gameWindowLoop game renderer window = do
         maybeGame <- handleEvents curGame
 
         case maybeGame of
+          Nothing -> return ()
           Just newGame -> do
-            newRenderer <- renderGame newGame curRenderer TTF
+            newRenderer <- renderGame newGame curRenderer font
+
+            when (isGameOver game || isGameSolved game) $ do
+              return ()
 
             present newRenderer
             loop newGame newRenderer
-          Nothing -> do
-            destroyWindow window
-            TTF.free Fonts
-            TTF.quit
-            exitSuccess
 
   loop game renderer
+  destroyWindow window
+  TTF.free font
+  TTF.quit
+  exitSuccess
 
 handleEvents :: Game -> IO (Maybe Game)
-handleEvents game = do
-  events <- pollEvents
-
+handleEvents game =
   foldr
     (\ev g -> handleGameEvent ev =<< g)
     (Just game)
-    events
+    <$> pollEvents
 
 handleGameEvent :: Event -> Game -> Maybe Game
-handleGameEvent event game
-  | isGameOver game = Nothing -- suspect
-  | isGameSolved game = Nothing
-  | otherwise =
-      case eventPayload event of
-        KeyboardEvent ev
-          | pressedKey KeycodeUp ev -> justMove North game
-          | pressedKey KeycodeDown ev -> justMove South game
-          | pressedKey KeycodeLeft ev -> justMove East game
-          | pressedKey KeycodeRight ev -> justMove West game
-          | otherwise -> Just game
-        WindowClosedEvent _ -> Nothing
-        _NoMatchingEvent -> Just game
+handleGameEvent event game =
+  case eventPayload event of
+    KeyboardEvent ev
+      | pressedKey KeycodeUp ev -> justMove North game
+      | pressedKey KeycodeDown ev -> justMove South game
+      | pressedKey KeycodeLeft ev -> justMove East game
+      | pressedKey KeycodeRight ev -> justMove West game
+      | otherwise -> Just game
+    WindowClosedEvent _ -> Nothing
+    _NoMatchingEvent -> Just game
   where
     justMove :: Move -> Game -> Maybe Game
-    justMove move = Just . traceShowId . moveGame move
+    justMove move = Just . moveGame move
 
     pressedKey :: Keycode -> KeyboardEventData -> Bool
     pressedKey keycode ev =
