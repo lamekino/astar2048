@@ -5,25 +5,12 @@ module Window
 where
 
 import qualified Colors
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, unless)
 import Data.Array (Array)
 import qualified Data.Array as Array
 import Data.Text (pack)
-import Data.Vector.Storable (Vector)
-import qualified Data.Vector.Storable as Vec
-import Debug.Trace (traceShow, traceShowId)
 import Foreign.C (CInt (CInt))
 import Game
-  ( Game (gameBoard),
-    GameResult,
-    Move (East, North, South, West),
-    Tile (tileExponent),
-    createTile,
-    isGameOver,
-    isGameSolved,
-    moveGame,
-    tileValue,
-  )
 import SDL
   ( Event (eventPayload),
     EventPayload (KeyboardEvent, WindowClosedEvent),
@@ -36,7 +23,7 @@ import SDL
 import SDL.Event (pollEvents)
 import qualified SDL.Font as TTF
 import SDL.Input.Keyboard.Codes
-import SDL.Vect hiding (Vector)
+import SDL.Vect
 import SDL.Video
 import System.Exit (exitSuccess)
 
@@ -44,9 +31,6 @@ type Bank a = Array Int a
 
 indexArray :: (Array.Ix i) => Array i e -> i -> e
 indexArray = (Array.!)
-
-indexVec :: (Vec.Storable a) => Vector a -> Int -> a
-indexVec = (Vec.!)
 
 gameWindowX :: CInt
 gameWindowX = 640
@@ -75,11 +59,12 @@ gamePlayArea =
     (P $ V2 (gameGridX - gameGridPadding) (gameGridY - gameGridPadding))
     (V2 (gameGridW + gameGridPadding) (gameGridH + gameGridPadding))
 
-gameTiles :: Vector (Rectangle CInt)
+gameTiles :: Bank (Rectangle CInt)
 gameTiles =
   let tileX = gameGridW `div` 4
       tileY = gameGridH `div` 4
-   in Vec.fromList
+   in Array.listArray
+        (1, 16)
         [ let rX = tileX * (i - 1) + gameGridX
               rY = tileY * (j - 1) + gameGridY
               rW = tileX - gameGridPadding
@@ -158,10 +143,11 @@ renderGame tileBank game renderer font = do
 
   forM_
     (Array.indices board)
-    ( \ai@(n, m) ->
-        let vi = 4 * (m - 1) + (n - 1)
-            curTile = board `indexArray` ai
-            curRect = gameTiles `indexVec` vi
+    ( \boardIdx@(row, col) ->
+        -- board idxs are (1, 1), (1, 2), ... (4, 4); so we need to col - 1
+        let rectIdx = 4 * (col - 1) + row
+            curTile = board `indexArray` boardIdx
+            curRect = gameTiles `indexArray` rectIdx
          in renderTile tileBank curTile curRect renderer font
     )
 
