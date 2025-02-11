@@ -40,7 +40,13 @@ import SDL.Vect hiding (Vector)
 import SDL.Video
 import System.Exit (exitSuccess)
 
-type TextureBank = Array Int Texture
+type Bank a = Array Int a
+
+indexArray :: (Array.Ix i) => Array i e -> i -> e
+indexArray = (Array.!)
+
+indexVec :: (Vec.Storable a) => Vector a -> Int -> a
+indexVec = (Vec.!)
 
 gameWindowX :: CInt
 gameWindowX = 640
@@ -96,54 +102,53 @@ gameWindowInit = do
 
   return (renderer, window)
 
-fontTexture :: TTF.Font -> Renderer -> String -> IO Texture
-fontTexture font renderer str =
+tileTexture :: TTF.Font -> Renderer -> Tile -> IO Texture
+tileTexture font renderer tile =
   -- TODO: resolve tile text color from function
   createTextureFromSurface renderer
-    =<< TTF.solid font (Colors.rgb "#000000") (pack str)
+    =<< TTF.solid
+      font
+      (Colors.rgb "#000000")
+      (pack $ show (tileValue tile))
 
-preloadTextures :: TTF.Font -> Renderer -> Int -> IO TextureBank
-preloadTextures font renderer count =
+preloadTiles :: TTF.Font -> Renderer -> Int -> IO (Bank Texture)
+preloadTiles font renderer count =
   Array.listArray (1, count)
     <$> sequence
-      [ let tileText = show $ tileValue (createTile tileNo)
-         in fontTexture font renderer tileText
+      [ tileTexture font renderer $ createTile tileNo
         | tileNo <- [1 .. count]
       ]
 
 renderTile ::
-  TextureBank ->
+  Bank Texture ->
   Maybe Tile ->
   Rectangle CInt ->
   Renderer ->
   TTF.Font ->
   IO Renderer
-renderTile textureBank maybeTile rectangle renderer font = do
-  let indexArray = (Array.!)
+renderTile tileBank maybeTile rectangle renderer font = do
   rendererDrawColor renderer $= Colors.tileColor maybeTile
 
   fillRect renderer (Just rectangle)
 
   case maybeTile of
     Nothing -> return ()
-    Just tile
-      | let idx = tileExponent tile,
-        Array.inRange (Array.bounds textureBank) idx -> do
-          let textTexture = textureBank `indexArray` idx
+    Just tile -> do
+      let idx = tileExponent tile
 
-          copy renderer textTexture Nothing (Just rectangle)
-      | otherwise -> do
-          textTexture <- fontTexture font renderer (show $ tileValue tile)
+      useTexture <-
+        if Array.inRange (Array.bounds tileBank) idx
+          then pure $ tileBank `indexArray` idx -- ahead of time render
+          else tileTexture font renderer tile -- jit render (large values)
 
-          copy renderer textTexture Nothing (Just rectangle)
+      -- render the texture to the current rectangle
+      copy renderer useTexture Nothing (Just rectangle)
 
   return renderer
 
-renderGame :: TextureBank -> Game -> Renderer -> TTF.Font -> IO Renderer
-renderGame textureBank game renderer font = do
-  let indexArray = (Array.!)
-      indexVec = (Vec.!)
-      board = gameBoard game
+renderGame :: Bank Texture -> Game -> Renderer -> TTF.Font -> IO Renderer
+renderGame tileBank game renderer font = do
+  let board = gameBoard game
 
   rendererDrawColor renderer $= Colors.mainBG
   clear renderer
@@ -157,7 +162,7 @@ renderGame textureBank game renderer font = do
         let vi = 4 * (m - 1) + (n - 1)
             curTile = board `indexArray` ai
             curRect = gameTiles `indexVec` vi
-         in renderTile textureBank curTile curRect renderer font
+         in renderTile tileBank curTile curRect renderer font
     )
 
   return renderer
@@ -166,7 +171,7 @@ gameWindowLoop :: Game -> Renderer -> Window -> IO ()
 gameWindowLoop game renderer window = do
   -- TODO: change this!
   font <- TTF.load "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf" 12
-  preloaded <- preloadTextures font renderer 14
+  preloaded <- preloadTiles font renderer 14
 
   let loop curGame curRenderer = do
         maybeGame <- handleEvents curGame
