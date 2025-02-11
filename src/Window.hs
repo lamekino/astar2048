@@ -6,7 +6,7 @@ where
 
 import qualified Colors
 import Control.Monad (forM_, unless)
-import Data.Array (Array)
+import Data.Array (Array, (!))
 import qualified Data.Array as Array
 import Data.Text (pack)
 import Foreign.C (CInt (CInt))
@@ -29,8 +29,7 @@ import System.Exit (exitSuccess)
 
 type Bank a = Array Int a
 
-indexArray :: (Array.Ix i) => Array i e -> i -> e
-indexArray = (Array.!)
+type RenderArea = Rectangle CInt
 
 gameWindowX :: CInt
 gameWindowX = 640
@@ -53,13 +52,13 @@ gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
 gameGridH :: CInt
 gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
 
-gamePlayArea :: Rectangle CInt
+gamePlayArea :: RenderArea
 gamePlayArea =
   Rectangle
     (P $ V2 (gameGridX - gameGridPadding) (gameGridY - gameGridPadding))
     (V2 (gameGridW + gameGridPadding) (gameGridH + gameGridPadding))
 
-gameTiles :: Bank (Rectangle CInt)
+gameTiles :: Bank RenderArea
 gameTiles =
   let tileX = gameGridW `div` 4
       tileY = gameGridH `div` 4
@@ -88,13 +87,18 @@ gameWindowInit = do
   return (renderer, window)
 
 tileTexture :: TTF.Font -> Renderer -> Tile -> IO Texture
-tileTexture font renderer tile =
-  -- TODO: resolve tile text color from function
-  createTextureFromSurface renderer
-    =<< TTF.solid
-      font
-      (Colors.rgb "#000000")
-      (pack $ show (tileValue tile))
+tileTexture font renderer tile = do
+  -- TODO: resolve tile font color from function
+  fontSurface <-
+    TTF.solid font (Colors.rgb "#000000") (pack $ show (tileValue tile))
+
+  fontTexture <-
+    createTextureFromSurface renderer fontSurface
+
+  -- need to make sure the texture is eval'd before free
+  fontTexture `seq` freeSurface fontSurface
+
+  return fontTexture
 
 preloadTiles :: TTF.Font -> Renderer -> Int -> IO (Bank Texture)
 preloadTiles font renderer count =
@@ -107,7 +111,7 @@ preloadTiles font renderer count =
 renderTile ::
   Bank Texture ->
   Maybe Tile ->
-  Rectangle CInt ->
+  RenderArea ->
   Renderer ->
   TTF.Font ->
   IO Renderer
@@ -123,7 +127,7 @@ renderTile tileBank maybeTile rectangle renderer font = do
 
       useTexture <-
         if Array.inRange (Array.bounds tileBank) idx
-          then pure $ tileBank `indexArray` idx -- ahead of time render
+          then pure $ tileBank ! idx -- ahead of time render
           else tileTexture font renderer tile -- jit render (large values)
 
       -- render the texture to the current rectangle
@@ -146,8 +150,8 @@ renderGame tileBank game renderer font = do
     ( \boardIdx@(row, col) ->
         -- board idxs are (1, 1), (1, 2), ... (4, 4); so we need to col - 1
         let rectIdx = 4 * (col - 1) + row
-            curTile = board `indexArray` boardIdx
-            curRect = gameTiles `indexArray` rectIdx
+            curTile = board ! boardIdx
+            curRect = gameTiles ! rectIdx
          in renderTile tileBank curTile curRect renderer font
     )
 
