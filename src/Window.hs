@@ -5,12 +5,13 @@ module Window
 where
 
 import qualified Colors
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.Array (Array)
 import qualified Data.Array as Array
 import Data.Text (pack)
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as Vec
+import Debug.Trace (traceShow, traceShowId)
 import Foreign.C (CInt (CInt))
 import Game
   ( Game (gameBoard),
@@ -62,8 +63,8 @@ gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
 gameGridH :: CInt
 gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
 
-gameGrid :: Rectangle CInt
-gameGrid =
+gamePlayArea :: Rectangle CInt
+gamePlayArea =
   Rectangle
     (P $ V2 (gameGridX - gameGridPadding) (gameGridY - gameGridPadding))
     (V2 (gameGridW + gameGridPadding) (gameGridH + gameGridPadding))
@@ -101,16 +102,14 @@ fontTexture font renderer str =
   createTextureFromSurface renderer
     =<< TTF.solid font (Colors.rgb "#000000") (pack str)
 
-preloadTextures :: TTF.Font -> Renderer -> IO TextureBank
-preloadTextures font renderer =
-  Array.listArray (1, preloadCount)
+preloadTextures :: TTF.Font -> Renderer -> Int -> IO TextureBank
+preloadTextures font renderer count =
+  Array.listArray (1, count)
     <$> sequence
       [ let tileText = show $ tileValue (createTile tileNo)
          in fontTexture font renderer tileText
-        | tileNo <- [1 .. preloadCount]
+        | tileNo <- [1 .. count]
       ]
-  where
-    preloadCount = 14
 
 renderTile ::
   TextureBank ->
@@ -150,7 +149,7 @@ renderGame textureBank game renderer font = do
   clear renderer
 
   rendererDrawColor renderer $= Colors.gameBG
-  fillRect renderer (Just gameGrid)
+  fillRect renderer (Just gamePlayArea)
 
   forM_
     (Array.indices board)
@@ -167,7 +166,7 @@ gameWindowLoop :: Game -> Renderer -> Window -> IO ()
 gameWindowLoop game renderer window = do
   -- TODO: change this!
   font <- TTF.load "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf" 12
-  preloaded <- preloadTextures font renderer
+  preloaded <- preloadTextures font renderer 14
 
   let loop curGame curRenderer = do
         maybeGame <- handleEvents curGame
@@ -177,11 +176,10 @@ gameWindowLoop game renderer window = do
           Just newGame -> do
             newRenderer <- renderGame preloaded newGame curRenderer font
 
-            when (isGameOver game || isGameSolved game) $ do
-              return ()
-
             present newRenderer
-            loop newGame newRenderer
+
+            unless (isGameOver curGame || isGameSolved curGame) $ do
+              loop newGame newRenderer
 
   loop game renderer
 
