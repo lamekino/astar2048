@@ -88,9 +88,11 @@ preloadDigits :: TTF.Font -> Renderer -> IO (Bank Texture)
 preloadDigits font renderer =
   Array.listArray (0, 9)
     <$> sequence
-      [ stringTexture font (Colors.rgb "#000000") renderer (show digit)
+      [ stringTexture font color renderer (show digit)
         | digit <- [0 .. 9] :: [Int]
       ]
+  where
+    color = (Colors.rgb "#000000")
 
 renderScore :: Integer -> Bank Texture -> Renderer -> IO ()
 renderScore score digitBank renderer =

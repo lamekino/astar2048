@@ -21,9 +21,7 @@ import SDL
     InputMotion (Pressed),
     KeyboardEventData (keyboardEventKeyMotion, keyboardEventKeysym),
     Keysym (keysymKeycode),
-    WindowClosedEventData (windowClosedEventWindow),
     waitEvent,
-    ($=),
   )
 import qualified SDL.Font as TTF
 import SDL.Input.Keyboard.Codes
