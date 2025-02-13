@@ -8,12 +8,18 @@ version: 0.1.0.0
 build-type: Simple
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -prof -rtsopts
 
+-- TODO: make a separate executable with profiling enabled
 executable astar2048
     import: warnings
     main-is: Main.hs
-    other-modules: Game, Window, Colors
+    ghc-options:
+        -O2
+        -threaded
+        -fprof-auto
+        "-with-rtsopts=-N -p -s -h -i0.1"
+    other-modules: Game, Window, Colors, Dimensions, Render
     build-depends:
         base ^>=4.17.2.1,
         array ^>=0.5.4.0,

@@ -1,9 +1,9 @@
 import Game (createGame)
 import System.Random (getStdGen, mkStdGen)
-import Window (gameWindowInit, gameWindowLoop)
+import Window (windowInit, windowLoop)
 
 main :: IO ()
 main = do
   -- rng <- getStdGen
   let rng = mkStdGen 0
-  uncurry (gameWindowLoop $ createGame rng) =<< gameWindowInit
+  uncurry (windowLoop $ createGame rng) =<< windowInit
