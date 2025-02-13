@@ -5,7 +5,7 @@ module Window
 where
 
 import qualified Colors
-import Control.Monad (forM_, unless)
+import Control.Monad (forM_, unless, when)
 import Data.Array (Array, (!))
 import qualified Data.Array as Array
 import Data.Text (pack)
@@ -18,6 +18,7 @@ import SDL
     KeyboardEventData (keyboardEventKeyMotion, keyboardEventKeysym),
     Keysym (keysymKeycode),
     WindowClosedEventData (windowClosedEventWindow),
+    waitEvent,
     ($=),
   )
 import SDL.Event (pollEvents)
@@ -37,26 +38,42 @@ gameWindowX = 640
 gameWindowY :: CInt
 gameWindowY = 800
 
-gameGridPadding :: CInt
-gameGridPadding = 12
+gameAreaPadding :: CInt
+gameAreaPadding = 12
 
 gameGridX :: CInt
 gameGridX = gameWindowX `div` 18
 
 gameGridY :: CInt
-gameGridY = gameWindowY `div` 4
+gameGridY = gameWindowY `div` 5
 
 gameGridW :: CInt
-gameGridW = gameWindowX - 2 * gameGridX + gameGridPadding
+gameGridW = gameWindowX - 2 * gameGridX + gameAreaPadding
 
 gameGridH :: CInt
-gameGridH = gameWindowY - gameGridX - gameGridY + gameGridPadding
+gameGridH = gameWindowY - gameGridX - gameGridY + gameAreaPadding
 
 gamePlayArea :: RenderArea
-gamePlayArea =
-  Rectangle
-    (P $ V2 (gameGridX - gameGridPadding) (gameGridY - gameGridPadding))
-    (V2 (gameGridW + gameGridPadding) (gameGridH + gameGridPadding))
+gamePlayArea = Rectangle (P $ V2 x y) (V2 w h)
+  where
+    x = gameGridX - gameAreaPadding
+    y = gameGridY - gameAreaPadding
+    w = gameGridW + gameAreaPadding
+    h = gameGridH + gameAreaPadding
+
+gameScoreArea :: Bank RenderArea
+gameScoreArea =
+  Array.listArray
+    (1, numSections)
+    [ let x = gameGridW + gameGridX - (w * fromIntegral i)
+          y = gameGridX - gameAreaPadding
+          w = (7 * (gameGridW `div` 16)) `div` fromIntegral numSections
+          h = gameGridY - gameGridX - 2 * gameAreaPadding
+       in Rectangle (P $ V2 x y) (V2 w h)
+      | i <- [1 .. numSections]
+    ]
+  where
+    numSections = 6
 
 gameTiles :: Bank RenderArea
 gameTiles =
@@ -66,8 +83,8 @@ gameTiles =
         (1, 16)
         [ let rX = tileX * (i - 1) + gameGridX
               rY = tileY * (j - 1) + gameGridY
-              rW = tileX - gameGridPadding
-              rH = tileY - gameGridPadding
+              rW = tileX - gameAreaPadding
+              rH = tileY - gameAreaPadding
            in Rectangle (P $ V2 rX rY) (V2 rW rH)
           | i <- [1 .. 4],
             j <- [1 .. 4]
@@ -86,11 +103,9 @@ gameWindowInit = do
 
   return (renderer, window)
 
-tileTexture :: TTF.Font -> Renderer -> Tile -> IO Texture
-tileTexture font renderer tile = do
-  -- TODO: resolve tile font color from function
-  fontSurface <-
-    TTF.solid font (Colors.rgb "#000000") (pack $ show (tileValue tile))
+stringTexture :: TTF.Font -> Colors.RGB -> Renderer -> String -> IO Texture
+stringTexture font color renderer str = do
+  fontSurface <- TTF.solid font color (pack str)
 
   fontTexture <-
     createTextureFromSurface renderer fontSurface
@@ -100,6 +115,11 @@ tileTexture font renderer tile = do
 
   return fontTexture
 
+tileTexture :: TTF.Font -> Renderer -> Tile -> IO Texture
+tileTexture font renderer =
+  -- TODO: resolve tile font color from function
+  stringTexture font (Colors.rgb "#000000") renderer . show . tileValue
+
 preloadTiles :: TTF.Font -> Renderer -> Int -> IO (Bank Texture)
 preloadTiles font renderer count =
   Array.listArray (1, count)
@@ -108,13 +128,50 @@ preloadTiles font renderer count =
         | tileNo <- [1 .. count]
       ]
 
+preloadDigits :: TTF.Font -> Renderer -> IO (Bank Texture)
+preloadDigits font renderer =
+  Array.listArray (0, 9)
+    <$> sequence
+      [ stringTexture font (Colors.rgb "#000000") renderer (show digit)
+        | digit <- [0 .. 9] :: [Int]
+      ]
+
+renderScore :: Integer -> Bank Texture -> Renderer -> IO ()
+renderScore score digitBank renderer =
+  let helper :: Int -> Integer -> IO ()
+      helper idx remScore
+        | remScore == 0 = return ()
+        | not $ Array.inRange (Array.bounds gameScoreArea) idx = return ()
+        | otherwise = do
+            let slot = Just $ gameScoreArea ! idx
+                (rest, k) = divMod remScore 10
+                digit = fromIntegral k
+
+            copy renderer (digitBank ! digit) Nothing slot
+            helper (idx + 1) rest
+   in do
+        let (start, _) = Array.bounds gameScoreArea
+
+        forM_
+          gameScoreArea
+          ( \scoreArea -> do
+              rendererDrawColor renderer $= Colors.gameBG
+              fillRect renderer (Just scoreArea)
+          )
+
+        when (score == 0) $ do
+          copy renderer (digitBank ! 0) Nothing (Just $ gameScoreArea ! start)
+          return ()
+
+        helper start score
+
 renderTile ::
   Bank Texture ->
   Maybe Tile ->
   RenderArea ->
   Renderer ->
   TTF.Font ->
-  IO Renderer
+  IO ()
 renderTile tileBank maybeTile rectangle renderer font = do
   rendererDrawColor renderer $= Colors.tileColor maybeTile
 
@@ -133,17 +190,24 @@ renderTile tileBank maybeTile rectangle renderer font = do
       -- render the texture to the current rectangle
       copy renderer useTexture Nothing (Just rectangle)
 
-  return renderer
-
-renderGame :: Bank Texture -> Game -> Renderer -> TTF.Font -> IO Renderer
-renderGame tileBank game renderer font = do
+renderGame ::
+  Bank Texture ->
+  Bank Texture ->
+  Game ->
+  Renderer ->
+  TTF.Font ->
+  IO ()
+renderGame digitBank tileBank game renderer font = do
   let board = gameBoard game
+      score = gameScore game
 
   rendererDrawColor renderer $= Colors.mainBG
   clear renderer
 
   rendererDrawColor renderer $= Colors.gameBG
   fillRect renderer (Just gamePlayArea)
+
+  renderScore score digitBank renderer
 
   forM_
     (Array.indices board)
@@ -155,26 +219,24 @@ renderGame tileBank game renderer font = do
          in renderTile tileBank curTile curRect renderer font
     )
 
-  return renderer
-
 gameWindowLoop :: Game -> Renderer -> Window -> IO ()
 gameWindowLoop game renderer window = do
-  -- TODO: change this!
-  font <- TTF.load "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf" 12
-  preloaded <- preloadTiles font renderer 14
+  font <- TTF.load "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf" 12 -- FIXME:
+  tileBank <- preloadTiles font renderer 14
+  digitBank <- preloadDigits font renderer
 
-  let loop curGame curRenderer = do
-        maybeGame <- handleEvents curGame
+  let loop loopGame loopRenderer = do
+        maybeGame <- handleEvent loopGame
 
         case maybeGame of
           Nothing -> return ()
           Just newGame -> do
-            newRenderer <- renderGame preloaded newGame curRenderer font
+            renderGame digitBank tileBank newGame loopRenderer font
 
-            present newRenderer
+            present loopRenderer
 
-            unless (isGameOver curGame || isGameSolved curGame) $ do
-              loop newGame newRenderer
+            unless (isGameOver newGame || isGameSolved newGame) $ do
+              loop newGame loopRenderer
 
   loop game renderer
 
@@ -183,12 +245,9 @@ gameWindowLoop game renderer window = do
   TTF.quit
   exitSuccess
 
-handleEvents :: Game -> IO (Maybe Game)
-handleEvents game =
-  foldr
-    (\ev g -> handleGameEvent ev =<< g)
-    (Just game)
-    <$> pollEvents
+handleEvent :: Game -> IO (Maybe Game)
+handleEvent game =
+  flip handleGameEvent game <$> waitEvent
 
 handleGameEvent :: Event -> Game -> Maybe Game
 handleGameEvent event game =
